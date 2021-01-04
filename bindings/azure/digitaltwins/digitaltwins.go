@@ -9,11 +9,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
 	"regexp"
 
 	"github.com/dapr/components-contrib/bindings"
 	"github.com/dapr/dapr/pkg/logger"
 
+	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 
 	"github.com/dapr/components-contrib/bindings/azure/digitaltwins/digitaltwinsrest"
@@ -243,6 +249,53 @@ func (d *AzureDigitalTwins) patchTwin(patchOp jsonPatchOperation) {
 	client.Update(context.TODO(), patchOp.TwinID, patchDoc, "*", "", "")
 }
 */
+
+func (d *AzureDigitalTwins) digitalTwinUpdate(twinID string, patchDoc string) (bool, error) {
+	log.Printf("patchHttpTwin")
+	ccc := auth.NewClientCredentialsConfig(d.clientID, d.clientSecret, d.tenantID)
+	ccc.Resource = "https://digitaltwins.azure.net"
+
+	authorizer, _ := ccc.Authorizer()
+
+	baseURL := fmt.Sprintf("%s/digitaltwins/%s?api-version=2020-10-31", d.adtInstanceURL, twinID)
+
+	req, err := autorest.Prepare(&http.Request{},
+		authorizer.WithAuthorization(),
+		autorest.WithBaseURL(baseURL),
+		autorest.AsContentType("application/json-patch+json"),
+		autorest.AsPatch(),
+		autorest.WithHeader("If-Match", "*"),
+		autorest.WithString(patchDoc),
+	)
+
+	if err != nil {
+		log.Printf("Error creating request: %s", err)
+	}
+
+	logger := log.New(os.Stdout, "autorest: ", 0)
+
+	resp, err := autorest.Send(req,
+		autorest.WithLogging(logger),
+		autorest.DoErrorIfStatusCode(http.StatusInternalServerError),
+		autorest.DoCloseIfError(),
+	)
+
+	if err != nil {
+		log.Printf("Error creating request: %s", err)
+	}
+
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bodyString := string(bodyBytes)
+	log.Println(bodyString)
+
+	err = autorest.Respond(resp,
+		autorest.ByClosing())
+
+	return true, nil
+}
 
 func (*AzureDigitalTwins) getAzureDigitalTwinsMetadata(metadata bindings.Metadata) (*azureDigitalTwinsMetadata, error) {
 	meta := azureDigitalTwinsMetadata{}
